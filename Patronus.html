@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ja"><head><meta charset="utf-8"><title>守護霊 3D試作</title>
+<style>
+html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:sans-serif}
+canvas{display:block}
+#hint{position:fixed;left:10px;top:10px;color:#6cf;font:13px/1.7 monospace;white-space:pre;opacity:.8}
+</style>
+<script type="importmap">
+{"imports":{"three":"./three/build/three.module.js","three/addons/":"./three/examples/jsm/"}}
+</script></head><body>
+<div id="hint">Space=召喚 / R=馬の向きを90°回す / M=質感の切替 / H=この表示を隠す / F=全画面</div>
+<script type="module">
+import * as THREE from 'three';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';
+import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
+import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
+import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
+
+// ===== 設定 =====
+const MODEL_URL='./three/examples/models/gltf/Horse.glb';
+const T={form:2.2,pose:1,away:5,turn:1,back:5,stay:1.5,fade:1.5}; // 秒
+const NEAR=new THREE.Vector3(-0.8,0,1.5), FAR=new THREE.Vector3(2.5,0,-16);
+const BODY_LEN=2.4;                       // 馬の体の長さ(3D空間の単位)
+const hint=document.getElementById('hint');
+
+// ===== 基本セットアップ =====
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);
+document.body.appendChild(renderer.domElement);
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x000008);
+scene.fog=new THREE.FogExp2(0x000010,.035);
+const camera=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,.1,100);
+camera.position.set(0,1.3,6);camera.lookAt(0,1,0);
+const composer=new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene,camera));
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),1.1,.7,.05));
+composer.addPass(new OutputPass());
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);composer.setSize(innerWidth,innerHeight)});
+
+// ===== 光る質感(縁が強く光る半透明) =====
+const glowMat=new THREE.ShaderMaterial({
+  uniforms:{uColor:{value:new THREE.Color(0x9fd4ff)},uOp:{value:0}},
+  transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,
+  vertexShader:`#include <common>
+  #include <morphtarget_pars_vertex>
+  varying vec3 vN;varying vec3 vV;
+  void main(){
+    #include <beginnormal_vertex>
+    #include <morphnormal_vertex>
+    #include <begin_vertex>
+    #include <morphtarget_vertex>
+    vN=normalize(normalMatrix*objectNormal);
+    vec4 mv=modelViewMatrix*vec4(transformed,1.);vV=normalize(-mv.xyz);
+    gl_Position=projectionMatrix*mv;}`,
+  fragmentShader:`uniform vec3 uColor;uniform float uOp;varying vec3 vN;varying vec3 vV;
+  void main(){float f=pow(1.-abs(dot(normalize(vN),normalize(vV))),2.2);
+    gl_FragColor=vec4(uColor*(.5+f*1.8),(f*.95+.07)*uOp);}`});
+const simpleMat=new THREE.MeshBasicMaterial({color:0x9fd4ff,transparent:true,opacity:0,
+  blending:THREE.AdditiveBlending,depthWrite:false});
+let useGlow=true;const meshes=[];
+const setOpacity=o=>{glowMat.uniforms.uOp.value=o;simpleMat.opacity=o*.5};
+
+// ===== 馬のモデル =====
+const actor=new THREE.Group(),inner=new THREE.Group();actor.add(inner);scene.add(actor);actor.visible=false;
+let yaw=-Math.PI/2,mixer=null;inner.rotation.y=yaw;
+new GLTFLoader().load(MODEL_URL,g=>{
+  const m=g.scene;
+  m.traverse(o=>{if(o.isMesh){o.material=glowMat;o.frustumCulled=false;meshes.push(o)}});
+  const b=new THREE.Box3().setFromObject(m),s=b.getSize(new THREE.Vector3());
+  m.scale.setScalar(BODY_LEN/Math.max(s.x,s.y,s.z));
+  const b2=new THREE.Box3().setFromObject(m),c=b2.getCenter(new THREE.Vector3());
+  m.position.set(-c.x,-b2.min.y,-c.z);inner.add(m);
+  if(g.animations.length){mixer=new THREE.AnimationMixer(m);mixer.clipAction(g.animations[0]).play();}
+  hint.textContent+='\n\n馬を読み込みました。Spaceで召喚!';
+},undefined,e=>{hint.textContent='馬のモデルが読み込めません。\n'+MODEL_URL+' を確認してください。\n(Live Serverなどで開いていますか?)';});
+
+// ===== 足元の光と、光の粒(尾・霧) =====
+const gc=document.createElement('canvas');gc.width=gc.height=128;
+const gx=gc.getContext('2d'),gg=gx.createRadialGradient(64,64,0,64,64,64);
+gg.addColorStop(0,'rgba(140,200,255,.9)');gg.addColorStop(1,'rgba(0,0,0,0)');gx.fillStyle=gg;gx.fillRect(0,0,128,128);
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(4,4),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(gc),
+  transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0}));
+floor.rotation.x=-Math.PI/2;floor.position.y=.02;scene.add(floor);
+
+const N=2500,pp=new Float32Array(N*3),pv=new Float32Array(N*3),pl=new Float32Array(N);let pi=0;
+const pg=new THREE.BufferGeometry();pg.setAttribute('position',new THREE.BufferAttribute(pp,3));
+const pm=new THREE.PointsMaterial({color:0xaee0ff,size:.07,transparent:true,opacity:.8,
+  blending:THREE.AdditiveBlending,depthWrite:false});
+const pts=new THREE.Points(pg,pm);pts.frustumCulled=false;scene.add(pts);pp.fill(999);
+function emit(x,y,z,vx,vy,vz){const i=pi++%N;pp.set([x,y,z],i*3);pv.set([vx,vy,vz],i*3);pl[i]=1;}
+const r=(a)=>(Math.random()-.5)*a;
+
+// ===== 演出の進行 =====
+const ease=t=>t<0?0:t>1?1:t*t*(3-2*t);
+const tPose=T.form+T.pose,tAway=tPose+T.away,tTurn=tAway+T.turn,tBack=tTurn+T.back,tEnd=tBack+T.stay,tFade=tEnd+T.fade;
+const hAway=Math.atan2(FAR.x-NEAR.x,FAR.z-NEAR.z),hBack=hAway+Math.PI;
+let t0=null,playing=false;
+function summon(){if(playing||t0===null&&false)return;playing=true;t0=performance.now()/1000;actor.visible=true;}
+const clock=new THREE.Clock();
+function frame(){
+  const dt=Math.min(clock.getDelta(),.05);requestAnimationFrame(frame);
+  if(playing){
+    const t=performance.now()/1000-t0;let pos=NEAR.clone(),h=hAway,mv=0,scl=1;
+    if(t<T.form)scl=.7+.3*ease(t/T.form);
+    if(t>=tPose&&t<tAway){const u=ease((t-tPose)/T.away);pos.lerpVectors(NEAR,FAR,u);mv=1}
+    else if(t>=tAway&&t<tTurn){pos.copy(FAR);h=hAway+Math.PI*ease((t-tAway)/T.turn);mv=.3}
+    else if(t>=tTurn&&t<tBack){const u=ease((t-tTurn)/T.back);pos.lerpVectors(FAR,NEAR,u);h=hBack;mv=1}
+    else if(t>=tBack){pos.copy(NEAR);h=hBack}
+    const op=Math.min(1,t/T.form)*(t>tEnd?Math.max(0,1-(t-tEnd)/T.fade):1);
+    actor.position.copy(pos);actor.rotation.y=h;actor.scale.setScalar(scl);setOpacity(op);
+    if(mixer)mixer.update(dt*(mv?1.1*mv+.15:.12));
+    floor.position.set(pos.x,.02,pos.z);floor.material.opacity=op*.55;floor.scale.setScalar(scl);
+    // 光の粒:召喚時は渦、走るときは尾
+    if(t<T.form)for(let i=0;i<14;i++){const a=Math.random()*6.28,rr=.6+Math.random()*1.4*(1-t/T.form);
+      emit(pos.x+Math.cos(a)*rr,.2+Math.random()*1.6,pos.z+Math.sin(a)*rr,-Math.sin(a)*.8,r(.3)+.3,Math.cos(a)*.8);}
+    if(mv>.5)for(let i=0;i<10;i++)emit(pos.x+r(.8),.2+Math.random()*1.5,pos.z+r(.8),r(.3),r(.2)+.1,r(.3));
+    if(t>tFade){playing=false;actor.visible=false;floor.material.opacity=0;}
+  }
+  for(let i=0;i<N;i++){if(pl[i]<=0){pp[i*3]=999;continue}
+    pl[i]-=dt*.6;pp[i*3]+=pv[i*3]*dt;pp[i*3+1]+=pv[i*3+1]*dt;pp[i*3+2]+=pv[i*3+2]*dt;}
+  pg.attributes.position.needsUpdate=true;
+  composer.render();
+}
+frame();
+
+addEventListener('keydown',e=>{
+  if(e.code==='Space'){e.preventDefault();summon()}
+  else if(e.key==='r'||e.key==='R'){yaw+=Math.PI/2;inner.rotation.y=yaw}
+  else if(e.key==='m'||e.key==='M'){useGlow=!useGlow;meshes.forEach(o=>o.material=useGlow?glowMat:simpleMat)}
+  else if(e.key==='h'||e.key==='H')hint.style.display=hint.style.display==='none'?'block':'none';
+  else if(e.key==='f'||e.key==='F')document.documentElement.requestFullscreen?.();
+});
+addEventListener('pointerdown',summon);
+</script></body></html>
