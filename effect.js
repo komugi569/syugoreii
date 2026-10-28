@@ -3,11 +3,12 @@ class Effect {
   constructor(canvas){
     this.cv=canvas;this.ctx=canvas.getContext('2d');
     this.targets=CONFIG.animals.map(e=>this._sample(e));
-    this.ps=[];this.trail=[];this.state='idle';this.t0=0;this.lastEnd=0;this.onEnd=()=>{};
+    this.ps=[];this.trail=[];this.state='idle';this.t0=0;this.lastEnd=null;this.onEnd=()=>{};
     this._resize();addEventListener('resize',()=>this._resize());
   }
   _resize(){this.W=this.cv.width=innerWidth;this.H=this.cv.height=innerHeight}
-  get ready(){return this.state==='idle'&&performance.now()-this.lastEnd>CONFIG.cooldownMs}
+  // 起動直後は一度も召喚していないため、初回のクールダウンを適用しない。
+  get ready(){return this.state==='idle'&&(this.lastEnd===null||performance.now()-this.lastEnd>CONFIG.cooldownMs)}
   _sample(emoji){
     const s=300,o=document.createElement('canvas');o.width=o.height=s;
     const x=o.getContext('2d');x.font=(s*.8)+'px serif';x.textAlign='center';x.textBaseline='middle';
@@ -72,4 +73,4 @@ class Effect {
     if(t>tFade){this.state='idle';this.lastEnd=now;this.ps=[];this.trail=[];this.onEnd();}
   }
 }
- 
+

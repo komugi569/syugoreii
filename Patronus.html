@@ -8,7 +8,7 @@ canvas{display:block}
 <script type="importmap">
 {"imports":{"three":"./three/build/three.module.js","three/addons/":"./three/examples/jsm/"}}
 </script></head><body>
-<div id="hint">Space=召喚 / R=馬の向きを90°回す / M=質感の切替 / H=この表示を隠す / F=全画面</div>
+<div id="hint">Space=ランダム召喚 / 1〜5=動物指定 / R=向きを90°回す / M=質感切替 / H=表示切替 / F=全画面</div>
 <script type="module">
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
@@ -16,30 +16,123 @@ import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';
 import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
 import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
 import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
+import {PATRONUS_MODELS} from './patronus-config.js';
+
+
+const AudioController = {
+  sounds: {},
+  
+  // 用意した音声ファイルのファイル名（パス）
+  files: {
+    bgm: '守護霊召喚.mp3' // ← エンドレス再生したい音源ファイル名
+  },
+  
+  init() {
+    if (Object.keys(this.sounds).length === 0) {
+      for (const [key, path] of Object.entries(this.files)) {
+        this.sounds[key] = new Audio(path);
+        this.sounds[key].load();
+      }
+    }
+  },
+  
+  play(type) {
+    const sound = this.sounds[type];
+    if (!sound) return;
+    
+    if (!sound.paused) {
+      return; 
+    }
+    
+    sound.currentTime = 0;
+    
+    sound.play().catch(error => {
+      console.warn(`音声(${type})の再生がブロックされました:`, error);
+    });
+  },
+
+  // 音声をエンドレス（ループ）で再生するメソッド
+  playLoop(type) {
+    const sound = this.sounds[type];
+    if (!sound) return;
+
+    sound.loop = true;
+    sound.currentTime = 0;
+
+    sound.play().catch(error => {
+      console.warn(`ループ音声(${type})の再生がブロックされました:`, error);
+    });
+  },
+
+  // ループ音声を停止するメソッド
+  stop(type) {
+    const sound = this.sounds[type];
+    if (!sound) return;
+
+    sound.pause();
+    sound.currentTime = 0;
+  }
+};
 
 // ===== 設定 =====
-const MODEL_URL='./three/examples/models/gltf/Horse.glb';
 const T={form:2.2,pose:1,away:5,turn:1,back:5,stay:1.5,fade:1.5}; // 秒
 const NEAR=new THREE.Vector3(-0.8,0,1.5), FAR=new THREE.Vector3(2.5,0,-16);
-const BODY_LEN=2.4;                       // 馬の体の長さ(3D空間の単位)
 const hint=document.getElementById('hint');
 
 // ===== 基本セットアップ =====
 const renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);
 document.body.appendChild(renderer.domElement);
-const scene=new THREE.Scene();scene.background=new THREE.Color(0x000008);
-scene.fog=new THREE.FogExp2(0x000010,.035);
+const scene=new THREE.Scene();
 const camera=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,.1,100);
 camera.position.set(0,1.3,6);camera.lookAt(0,1,0);
+
 const composer=new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene,camera));
-composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),1.1,.7,.05));
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), 1.5, 0.7, 1.0));
 composer.addPass(new OutputPass());
-addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth,innerHeight);composer.setSize(innerWidth,innerHeight)});
 
-// ===== 光る質感(縁が強く光る半透明) =====
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);composer.setSize(innerWidth,innerHeight);
+});
+
+// ===== 背景画像と環境光の設定 =====
+const textureLoader = new THREE.TextureLoader();
+scene.background = textureLoader.load('./images/bg_forest.jpg');
+scene.fog = new THREE.FogExp2(0x000010, 0.035);
+
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.02);
+scene.add(ambientLight);
+
+// ===== ディメンター(GLB)の読み込みと配置 =====
+const dementors = [];
+new GLTFLoader().load('./models/Dementor.glb', (gltf) => { 
+  const baseModel = gltf.scene;
+  baseModel.scale.setScalar(1.0);
+
+  for (let i = 0; i < 12; i++) {
+    const d = baseModel.clone();
+    d.userData = {
+      baseY: 1.0 + Math.random() * 2,
+      rangeX: 4 + Math.random() * 3,
+      rangeZ: 3 + Math.random() * 2,
+      speedX: 0.15 + Math.random() * 0.2,
+      speedZ: 0.1 + Math.random() * 0.2,
+      phaseX: Math.random() * Math.PI * 2,
+      phaseZ: Math.random() * Math.PI * 2,
+      phaseY: Math.random() * Math.PI * 2
+    };
+    scene.add(d);
+    dementors.push(d);
+  }
+  hint.textContent += `\nディメンターを配置しました`;
+}, undefined, (error) => {
+  console.error("GLB読み込みエラー:", error);
+  hint.textContent += `\nディメンターのGLBを読み込めません`;
+});
+
+// ===== 光る質感 =====
 const glowMat=new THREE.ShaderMaterial({
   uniforms:{uColor:{value:new THREE.Color(0x9fd4ff)},uOp:{value:0}},
   transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,
@@ -62,19 +155,39 @@ const simpleMat=new THREE.MeshBasicMaterial({color:0x9fd4ff,transparent:true,opa
 let useGlow=true;const meshes=[];
 const setOpacity=o=>{glowMat.uniforms.uOp.value=o;simpleMat.opacity=o*.5};
 
-// ===== 馬のモデル =====
+// ===== 守護霊カタログ =====
+const catalog=PATRONUS_MODELS;
 const actor=new THREE.Group(),inner=new THREE.Group();actor.add(inner);scene.add(actor);actor.visible=false;
-let yaw=-Math.PI/2,mixer=null;inner.rotation.y=yaw;
-new GLTFLoader().load(MODEL_URL,g=>{
-  const m=g.scene;
-  m.traverse(o=>{if(o.isMesh){o.material=glowMat;o.frustumCulled=false;meshes.push(o)}});
-  const b=new THREE.Box3().setFromObject(m),s=b.getSize(new THREE.Vector3());
-  m.scale.setScalar(BODY_LEN/Math.max(s.x,s.y,s.z));
-  const b2=new THREE.Box3().setFromObject(m),c=b2.getCenter(new THREE.Vector3());
-  m.position.set(-c.x,-b2.min.y,-c.z);inner.add(m);
-  if(g.animations.length){mixer=new THREE.AnimationMixer(m);mixer.clipAction(g.animations[0]).play();}
-  hint.textContent+='\n\n馬を読み込みました。Spaceで召喚!';
-},undefined,e=>{hint.textContent='馬のモデルが読み込めません。\n'+MODEL_URL+' を確認してください。\n(Live Serverなどで開いていますか?)';});
+let yaw=0,mixer=null;inner.rotation.y=yaw;
+function part(parent,geometry,pos,scale=[1,1,1]){const m=new THREE.Mesh(geometry,glowMat);m.position.set(...pos);m.scale.set(...scale);m.frustumCulled=false;parent.add(m);meshes.push(m);return m;}
+function makeSpirit(kind){
+  const g=new THREE.Group(),sphere=new THREE.SphereGeometry(1,16,12),cone=new THREE.ConeGeometry(.22,.65,10),legGeo=new THREE.CylinderGeometry(.07,.1,.7,8);
+  part(g,sphere,[0,.85,0],[.72,.55,.35]);part(g,sphere,[.48,1.28,0],[.34,.36,.3]);
+  const ears=kind==='owl'?2:kind==='cat'||kind==='deer'?2:0;
+  for(let i=0;i<ears;i++){const x=(i?1:-1)*.2;part(g,cone,[.48+x,1.65,0],[kind==='deer'?.6:1,kind==='deer'?1.3:.8,1]);}
+  if(kind==='owl'){part(g,sphere,[.62,1.32,.22],[.13,.13,.09]);part(g,sphere,[.62,1.32,-.22],[.13,.13,.09]);}
+  for(const x of [-.42,.42])for(const z of [-.2,.2])part(g,legGeo,[x,.34,z]);
+  if(kind==='deer'){for(const x of [-.16,.16]){part(g,cone,[.4+x,1.88,0],[.45,1.3,1]);part(g,cone,[.4+x*1.8,2.22,0],[.25,.9,1]);}}
+  if(kind==='dog'||kind==='cat'){const tail=part(g,new THREE.CylinderGeometry(.06,.1,.7,8),[-.78,1.03,0]);tail.rotation.z=-.9;}
+  const box=new THREE.Box3().setFromObject(g),size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3());
+  g.position.set(-center.x,-box.min.y,-center.z);g.scale.setScalar(2.1/Math.max(size.x,size.y,size.z));return g;
+}
+const loaded=new Map();
+function prepareModel(gltf,entry){const m=gltf.scene;m.traverse(o=>{if(o.isMesh){o.material=glowMat;o.frustumCulled=false;meshes.push(o)}});
+  const b=new THREE.Box3().setFromObject(m),s=b.getSize(new THREE.Vector3());m.scale.setScalar(entry.scale/Math.max(s.x,s.y,s.z));
+  const b2=new THREE.Box3().setFromObject(m),c=b2.getCenter(new THREE.Vector3());m.position.set(-c.x,-b2.min.y+(entry.yOffset||0),-c.z);return m;}
+for(const [i,entry] of catalog.entries()){
+  if(entry.url)new GLTFLoader().load(entry.url,g=>{loaded.set(i,{model:prepareModel(g,entry),animations:g.animations,entry});hint.textContent+=`\n${entry.name}を読み込みました`;},undefined,()=>{hint.textContent+=`\n${entry.name}のGLBを読み込めません`;});
+  else loaded.set(i,{model:makeSpirit(entry.kind),animations:[],entry});
+}
+function selectSpirit(index){const data=loaded.get(index);if(!data)return false;
+  while(inner.children.length)inner.remove(inner.children[0]);for(const m of meshes.slice())if(!m.parent)meshes.splice(meshes.indexOf(m),1);
+  inner.add(data.model);data.model.traverse?.(o=>{if(o.isMesh)o.material=useGlow?glowMat:simpleMat;});
+  yaw=data.entry.yawOffset||0;inner.rotation.y=yaw;
+  mixer=data.animations.length?new THREE.AnimationMixer(data.model):null;
+  if(mixer){const n=data.entry.runAnimIndex??0;mixer.clipAction(data.animations[Math.min(n,data.animations.length-1)]).play();}
+  return true;
+}
 
 // ===== 足元の光と、光の粒(尾・霧) =====
 const gc=document.createElement('canvas');gc.width=gc.height=128;
@@ -86,7 +199,7 @@ floor.rotation.x=-Math.PI/2;floor.position.y=.02;scene.add(floor);
 
 const N=2500,pp=new Float32Array(N*3),pv=new Float32Array(N*3),pl=new Float32Array(N);let pi=0;
 const pg=new THREE.BufferGeometry();pg.setAttribute('position',new THREE.BufferAttribute(pp,3));
-const pm=new THREE.PointsMaterial({color:0xaee0ff,size:.07,transparent:true,opacity:.8,
+const pm=new THREE.PointsMaterial({color:0xaee0ff,size:.07,transparent:true,opacity:.3,
   blending:THREE.AdditiveBlending,depthWrite:false});
 const pts=new THREE.Points(pg,pm);pts.frustumCulled=false;scene.add(pts);pp.fill(999);
 function emit(x,y,z,vx,vy,vz){const i=pi++%N;pp.set([x,y,z],i*3);pv.set([vx,vy,vz],i*3);pl[i]=1;}
@@ -97,12 +210,35 @@ const ease=t=>t<0?0:t>1?1:t*t*(3-2*t);
 const tPose=T.form+T.pose,tAway=tPose+T.away,tTurn=tAway+T.turn,tBack=tTurn+T.back,tEnd=tBack+T.stay,tFade=tEnd+T.fade;
 const hAway=Math.atan2(FAR.x-NEAR.x,FAR.z-NEAR.z),hBack=hAway+Math.PI;
 let t0=null,playing=false;
-function summon(){if(playing||t0===null&&false)return;playing=true;t0=performance.now()/1000;actor.visible=true;}
-const clock=new THREE.Clock();
+
+function summon(index){
+  // ▼▼▼ 初回召喚（操作）のタイミングでBGMのループ再生をスタート ▼▼▼
+  AudioController.init();
+  AudioController.playLoop('bgm');
+
+  if(playing)return;
+  const available=[...loaded.keys()];
+  const chosen=index??available[Math.floor(Math.random()*available.length)];
+  if(!selectSpirit(chosen))return;
+  playing=true;t0=performance.now()/1000;actor.visible=true;hint.dataset.active=catalog[chosen].name;
+}
+
+let lastTime = performance.now();
 function frame(){
-  const dt=Math.min(clock.getDelta(),.05);requestAnimationFrame(frame);
+  const now = performance.now();
+  const dt = Math.min((now - lastTime) / 1000, .05);
+  lastTime = now;
+  requestAnimationFrame(frame);
+  const tNow = now / 1000;
+  
+  dementors.forEach(d => {
+    d.position.x = Math.sin(tNow * d.userData.speedX + d.userData.phaseX) * d.userData.rangeX;
+    d.position.z = Math.cos(tNow * d.userData.speedZ + d.userData.phaseZ) * d.userData.rangeZ - 5; 
+    d.position.y = d.userData.baseY + Math.sin(tNow * 1.5 + d.userData.phaseY) * 0.6;
+  });
+
   if(playing){
-    const t=performance.now()/1000-t0;let pos=NEAR.clone(),h=hAway,mv=0,scl=1;
+    const t=now/1000-t0;let pos=NEAR.clone(),h=hAway,mv=0,scl=1;
     if(t<T.form)scl=.7+.3*ease(t/T.form);
     if(t>=tPose&&t<tAway){const u=ease((t-tPose)/T.away);pos.lerpVectors(NEAR,FAR,u);mv=1}
     else if(t>=tAway&&t<tTurn){pos.copy(FAR);h=hAway+Math.PI*ease((t-tAway)/T.turn);mv=.3}
@@ -112,7 +248,6 @@ function frame(){
     actor.position.copy(pos);actor.rotation.y=h;actor.scale.setScalar(scl);setOpacity(op);
     if(mixer)mixer.update(dt*(mv?1.1*mv+.15:.12));
     floor.position.set(pos.x,.02,pos.z);floor.material.opacity=op*.55;floor.scale.setScalar(scl);
-    // 光の粒:召喚時は渦、走るときは尾
     if(t<T.form)for(let i=0;i<14;i++){const a=Math.random()*6.28,rr=.6+Math.random()*1.4*(1-t/T.form);
       emit(pos.x+Math.cos(a)*rr,.2+Math.random()*1.6,pos.z+Math.sin(a)*rr,-Math.sin(a)*.8,r(.3)+.3,Math.cos(a)*.8);}
     if(mv>.5)for(let i=0;i<10;i++)emit(pos.x+r(.8),.2+Math.random()*1.5,pos.z+r(.8),r(.3),r(.2)+.1,r(.3));
@@ -127,6 +262,7 @@ frame();
 
 addEventListener('keydown',e=>{
   if(e.code==='Space'){e.preventDefault();summon()}
+  else if(/^[1-5]$/.test(e.key))summon(Number(e.key)-1)
   else if(e.key==='r'||e.key==='R'){yaw+=Math.PI/2;inner.rotation.y=yaw}
   else if(e.key==='m'||e.key==='M'){useGlow=!useGlow;meshes.forEach(o=>o.material=useGlow?glowMat:simpleMat)}
   else if(e.key==='h'||e.key==='H')hint.style.display=hint.style.display==='none'?'block':'none';

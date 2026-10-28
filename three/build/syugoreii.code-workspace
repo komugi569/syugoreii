@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"name": "syugoreii",
+			"path": "../.."
+		}
+	],
+	"settings": {
+		"liveServer.settings.multiRootWorkspaceName": "syugoreii"
+	}
+}
