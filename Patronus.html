@@ -1,5 +1,7 @@
 <!DOCTYPE html>
 <html lang="ja"><head><meta charset="utf-8"><title>守護霊 3D試作</title>
+<!-- faviconの404エラーを防ぐための記述 -->
+<link rel="icon" href="data:,">
 <style>
 html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:sans-serif}
 canvas{display:block}
@@ -9,6 +11,10 @@ canvas{display:block}
 {"imports":{"three":"./three/build/three.module.js","three/addons/":"./three/examples/jsm/"}}
 </script></head><body>
 <div id="hint">Space=ランダム召喚 / 1〜5=動物指定 / R=向きを90°回す / M=質感切替 / H=表示切替 / F=全画面</div>
+
+<!-- 背景用映像ファイル (直下の ディメンター.mp4 を指定) -->
+<video id="bg-video" src="./ディメンター.mp4" loop muted playsinline style="display:none;"></video>
+
 <script type="module">
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
@@ -22,9 +28,8 @@ import {PATRONUS_MODELS} from './patronus-config.js';
 const AudioController = {
   sounds: {},
   
-  // 用意した音声ファイルのファイル名（パス）
   files: {
-    bgm: '守護霊召喚.mp3' // ← エンドレス再生したい音源ファイル名
+    bgm: '守護霊召喚.mp3'
   },
   
   init() {
@@ -39,36 +44,28 @@ const AudioController = {
   play(type) {
     const sound = this.sounds[type];
     if (!sound) return;
-    
-    if (!sound.paused) {
-      return; 
-    }
-    
+    if (!sound.paused) return; 
     sound.currentTime = 0;
-    
     sound.play().catch(error => {
       console.warn(`音声(${type})の再生がブロックされました:`, error);
     });
   },
 
-  // 音声をエンドレス（ループ）で再生するメソッド
   playLoop(type) {
     const sound = this.sounds[type];
     if (!sound) return;
+    if (!sound.paused) return;
 
     sound.loop = true;
     sound.currentTime = 0;
-
     sound.play().catch(error => {
       console.warn(`ループ音声(${type})の再生がブロックされました:`, error);
     });
   },
 
-  // ループ音声を停止するメソッド
   stop(type) {
     const sound = this.sounds[type];
     if (!sound) return;
-
     sound.pause();
     sound.currentTime = 0;
   }
@@ -97,40 +94,15 @@ addEventListener('resize',()=>{
   renderer.setSize(innerWidth,innerHeight);composer.setSize(innerWidth,innerHeight);
 });
 
-// ===== 背景画像と環境光の設定 =====
-const textureLoader = new THREE.TextureLoader();
-scene.background = textureLoader.load('./images/bg_forest.jpg');
+// ===== 背景映像と環境光の設定 =====
+const video = document.getElementById('bg-video');
+const videoTexture = new THREE.VideoTexture(video);
+videoTexture.colorSpace = THREE.SRGBColorSpace;
+scene.background = videoTexture;
 scene.fog = new THREE.FogExp2(0x000010, 0.035);
 
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.02);
 scene.add(ambientLight);
-
-// ===== ディメンター(GLB)の読み込みと配置 =====
-const dementors = [];
-new GLTFLoader().load('./models/Dementor.glb', (gltf) => { 
-  const baseModel = gltf.scene;
-  baseModel.scale.setScalar(1.0);
-
-  for (let i = 0; i < 12; i++) {
-    const d = baseModel.clone();
-    d.userData = {
-      baseY: 1.0 + Math.random() * 2,
-      rangeX: 4 + Math.random() * 3,
-      rangeZ: 3 + Math.random() * 2,
-      speedX: 0.15 + Math.random() * 0.2,
-      speedZ: 0.1 + Math.random() * 0.2,
-      phaseX: Math.random() * Math.PI * 2,
-      phaseZ: Math.random() * Math.PI * 2,
-      phaseY: Math.random() * Math.PI * 2
-    };
-    scene.add(d);
-    dementors.push(d);
-  }
-  hint.textContent += `\nディメンターを配置しました`;
-}, undefined, (error) => {
-  console.error("GLB読み込みエラー:", error);
-  hint.textContent += `\nディメンターのGLBを読み込めません`;
-});
 
 // ===== 光る質感 =====
 const glowMat=new THREE.ShaderMaterial({
@@ -212,7 +184,10 @@ const hAway=Math.atan2(FAR.x-NEAR.x,FAR.z-NEAR.z),hBack=hAway+Math.PI;
 let t0=null,playing=false;
 
 function summon(index){
-  // ▼▼▼ 初回召喚（操作）のタイミングでBGMのループ再生をスタート ▼▼▼
+  // ユーザーの初回操作時に動画とBGMの再生を開始
+  if (video.paused) {
+    video.play().catch(e => console.warn('動画再生ブロック:', e));
+  }
   AudioController.init();
   AudioController.playLoop('bgm');
 
@@ -229,14 +204,7 @@ function frame(){
   const dt = Math.min((now - lastTime) / 1000, .05);
   lastTime = now;
   requestAnimationFrame(frame);
-  const tNow = now / 1000;
   
-  dementors.forEach(d => {
-    d.position.x = Math.sin(tNow * d.userData.speedX + d.userData.phaseX) * d.userData.rangeX;
-    d.position.z = Math.cos(tNow * d.userData.speedZ + d.userData.phaseZ) * d.userData.rangeZ - 5; 
-    d.position.y = d.userData.baseY + Math.sin(tNow * 1.5 + d.userData.phaseY) * 0.6;
-  });
-
   if(playing){
     const t=now/1000-t0;let pos=NEAR.clone(),h=hAway,mv=0,scl=1;
     if(t<T.form)scl=.7+.3*ease(t/T.form);
