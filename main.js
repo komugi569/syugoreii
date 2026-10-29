@@ -1,3 +1,7 @@
+// 【変更】ローカルにある Three.js を読み込む
+import * as THREE from './three/build/three.module.js';
+import { GLTFLoader } from './three/examples/jsm/loaders/GLTFLoader.js';
+
 const $=id=>document.getElementById(id);
 const msg=$('msg'),dbg=$('dbg');
 const effect=new Effect($('c'));
