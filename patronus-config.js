@@ -3,8 +3,14 @@
 export const PATRONUS_MODELS = [
   // すでにGLBが設定されている例
   // ▼ ここをご自身のGLBファイルのパスに書き換える ▼
-  {name:'狐',emoji:'🐈',url:'./models/Fox.glb', scale:1, yOffset:0, yawOffset:0},
+  {name:'狐',emoji:'🐈',url:'./models/Fox.glb', scale:1, yOffset:0.5, xOffset:0, zOffset:0},
   {name:'狼',emoji:'🦉',url:'./models/Wolf.glb', scale:1.4},
-  {name:'犬',emoji:'🐕',url:'./models/my_dog.glb', scale:1.8},
-  {name:'鹿',emoji:'🦌',url:'./models/my_deer.glb', scale:2.1},
+  {name:'わし',emoji:'🐕',url:'./models/わし.glb', scale:1},
+  {name:'鹿',emoji:'🦌',url:'./models/deer.glb', scale:1},
+{name:'猫',emoji:'🦌',url:'./models/cat.glb', scale:1},
+{name:'ペンギン',emoji:'🦌',url:'./models/penguin.glb', scale:1},
+{name:'トラ',emoji:'🦌',url:'./models/tiger.glb', scale:1},
+
+
+
 ];
