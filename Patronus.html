@@ -118,11 +118,12 @@ const basePatronusMat = new THREE.MeshBasicMaterial({
 
 const catalog=PATRONUS_MODELS;
 const loaded=new Map();
+const failed=new Map();
 
 function updateHintUI() {
   let text = "";
   catalog.forEach((entry, i) => {
-    const status = loaded.has(i) ? "✓" : "読み込み中...";
+    const status = loaded.has(i) ? "✓" : failed.has(i) ? `読み込み失敗: ${failed.get(i)}` : "読み込み中...";
     text += `[ ${i + 1} ] : ${entry.name} (${status})\n`;
   });
   hintText.textContent = text;
@@ -156,7 +157,9 @@ for(const [i,entry] of catalog.entries()){
       const prepped = prepareModel(g, entry);
       loaded.set(i,{ model:prepped.m, mat:prepped.mat, animations:g.animations, entry });
       updateHintUI();
-    },undefined,()=>{
+    },undefined,error=>{
+      console.error(`守護霊モデルの読み込みに失敗しました: ${entry.url}`,error);
+      failed.set(i,`${entry.url} / ${error?.message||error?.type||'不明なエラー'}`);
       updateHintUI();
     });
   }
