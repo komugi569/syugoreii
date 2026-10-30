@@ -238,9 +238,10 @@ function summon(forcedIndex = null){
 
   activeActors = [];
   
-  // 【変更】 画面内に収まるように最大幅を制限（ここでは 5.0 に設定）
-  const maxSpanX = 5.0; 
-  const idealSpanX = 2.4 * (count - 1);
+  //// 【変更】 画面の縦横比（アスペクト比）に合わせて最大幅を自動計算し、はみ出しを防ぐ
+  const aspect = innerWidth / innerHeight;
+  const maxSpanX = aspect * 1.6; // 画面幅の約85%を最大幅とする
+  const idealSpanX = 0.8 * (count - 1); // 1体あたりの間隔も少し狭める
   const spanX = count === 1 ? 0 : Math.min(idealSpanX, maxSpanX);
   const startX = count === 1 ? 0 : -(spanX / 2);
 

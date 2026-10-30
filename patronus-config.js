@@ -6,11 +6,11 @@ export const PATRONUS_MODELS = [
   {name:'狐',emoji:'🐈',url:'./models/Fox.glb', scale:1, yOffset:0.5, xOffset:0, zOffset:0, runAnimIndex: 0
     ,glowLevel: 0.6,yawOffset: Math.PI / 1
   },
-  {name:'狼',emoji:'🦉',url:'./models/Wolf.glb', scale:1,yOffset:0.5,runAnimIndex: 0,yawOffset: -Math.PI / 1
+  {name:'狼',emoji:'🦉',url:'./models/Wolf.glb', scale:1,yOffset:0.5,runAnimIndex: 0
     ,glowLevel: 0.6
   },
   {name:'わし',emoji:'🐕',url:'./models/わし.glb', scale:1,yOffset:1,runAnimIndex: 0
-    ,glowLevel: 0.6
+    ,glowLevel: 0.6,yawOffset: -Math.PI / 1
   },
   {name:'鹿',emoji:'🦌',url:'./models/deer.glb', scale:1,yOffset:0.6,runAnimIndex: 0
     ,glowLevel: 0.6
@@ -21,8 +21,8 @@ export const PATRONUS_MODELS = [
 {name:'ペンギン',emoji:'🦌',url:'./models/penguin.glb', yOffset:0.6,scale:0.6,runAnimIndex: 0
   ,glowLevel: 0.6
 },
-{name:'トラ',emoji:'🦌',url:'./models/tiger.glb', scale:2,yOffset:0.6,runAnimIndex: 0
-  ,glowLevel: 0.6
+{name:'トラ',emoji:'🦌',url:'./models/tiger.glb', scale:1.5,yOffset:0.6,runAnimIndex: 0
+  ,glowLevel: 0.5
 },
 
 
