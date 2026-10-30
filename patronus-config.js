@@ -21,10 +21,5 @@ export const PATRONUS_MODELS = [
 {name:'ペンギン',emoji:'🦌',url:'./models/penguin.glb', yOffset:0.6,scale:0.6,runAnimIndex: 0
   ,glowLevel: 0.6
 },
-{name:'トラ',emoji:'🦌',url:'./models/tiger.glb', scale:1.5,yOffset:0.6,runAnimIndex: 0
-  ,glowLevel: 0.5
-},
-
-
 
 ];
