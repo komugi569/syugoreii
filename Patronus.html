@@ -17,7 +17,9 @@ canvas{display:block}
   background:#6cf; color:#000; border:none; padding:4px 10px; font-weight:bold;
   border-radius:4px; cursor:pointer; margin-top:5px; width:100%;
 }
-/* 画面全体を覆うフラッシュ用の白幕 */
+.btn-danger {
+  background:#d65; color:#fff;
+}
 #screen-flash {
   position:fixed; top:0; left:0; width:100vw; height:100vh;
   background:#ffffff; opacity:0; z-index:9999; pointer-events:none;
@@ -29,7 +31,8 @@ canvas{display:block}
 
 <div id="hint-container">
 <div>Space=人数分召喚 / 数字(1-9)=単体指定
-Enter=閃光 / R=向き90°回転 / H=UI切替 / F=全画面</div>
+Enter=閃光 / D=ディメンター復活
+R=向き90°回転 / H=UI切替 / F=全画面</div>
 <div style="margin: 8px 0; border-top: 1px dashed #6cf; padding-top: 8px;">召喚人数: <select id="summon-count">
   <option value="1">1体</option>
   <option value="2">2体</option>
@@ -38,14 +41,14 @@ Enter=閃光 / R=向き90°回転 / H=UI切替 / F=全画面</div>
   <option value="5">5体</option>
 </select>
 <button class="btn" onclick="triggerScreenFlash()">閃光を放つ (Enter)</button>
+<button class="btn btn-danger" onclick="resurrectDementor()">ディメンター復活 (D)</button>
 </div>
 <div id="hint-text">読み込み中...</div>
 </div>
 
-<!-- フラッシュ演出用のレイヤー -->
 <div id="screen-flash"></div>
 
-<video id="bg-video" src="./ディメンター.mp4" autoplay muted playsinline style="display:none;"></video>
+<video id="bg-video" src="./ディメンター.mp4" autoplay muted playsinline loop style="display:none;"></video>
 
 <script type="module">
 import * as THREE from 'three';
@@ -57,7 +60,8 @@ import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
 import {PATRONUS_MODELS} from './patronus-config.js';
 
 const AudioController = {
-  sounds: {}, files: { bgm: 'syoukan.mp3' },
+  sounds: {}, 
+  files: { bgm: './syoukan.mp3' },
   init() {
     if (Object.keys(this.sounds).length === 0) {
       for (const [key, path] of Object.entries(this.files)) {
@@ -72,12 +76,16 @@ const AudioController = {
   }
 };
 
-const T={form:2.2,pose:1,away:5,turn:1,back:5,stay:1.5,fade:1.5}; 
+const T={form:2.2, stay:8.0, fade:1.5}; 
 const NEAR=new THREE.Vector3(0, -0.2, 4.0), FAR=new THREE.Vector3(2.5,0,-16);
 const hintText=document.getElementById('hint-text');
 
 const renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);
+
+renderer.toneMapping = THREE.LinearToneMapping;
+renderer.toneMappingExposure = 1.5; 
+
 document.body.appendChild(renderer.domElement);
 const scene=new THREE.Scene();
 const camera=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,.1,100);
@@ -88,21 +96,45 @@ composer.addPass(new RenderPass(scene,camera));
 composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), 1.2, 0.7, 0.8));
 composer.addPass(new OutputPass());
 
-addEventListener('resize',()=>{
-  camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth,innerHeight);composer.setSize(innerWidth,innerHeight);
-});
-
 const video = document.getElementById('bg-video');
 const TRIM_START = 2.0; 
 video.addEventListener('loadedmetadata', () => { video.currentTime = TRIM_START; });
-video.addEventListener('ended', () => { video.currentTime = TRIM_START; video.play().catch(()=>{}); });
+
+scene.background = new THREE.Color(0x000000); 
+scene.fog = new THREE.FogExp2(0x111122, 0.02);
+scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+
+const bgDistance = 50;
+const bgHeight = 2 * Math.tan(THREE.MathUtils.degToRad(50 / 2)) * bgDistance;
+const bgGeo = new THREE.PlaneGeometry(bgHeight, bgHeight);
+
+const textureLoader = new THREE.TextureLoader();
+const forestTexture = textureLoader.load('./images/bg_forest.jpg');
+forestTexture.colorSpace = THREE.SRGBColorSpace;
+const forestMat = new THREE.MeshBasicMaterial({ map: forestTexture, depthWrite: false });
+const forestMesh = new THREE.Mesh(bgGeo, forestMat);
+forestMesh.position.z = -bgDistance - 1; 
+forestMesh.renderOrder = -1000;
+camera.add(forestMesh);
 
 const videoTexture = new THREE.VideoTexture(video);
 videoTexture.colorSpace = THREE.SRGBColorSpace;
-scene.background = videoTexture;
-scene.fog = new THREE.FogExp2(0x000010, 0.035);
-scene.add(new THREE.AmbientLight(0xffffff, 0.02));
+const bgMat = new THREE.MeshBasicMaterial({ map: videoTexture, transparent: true, opacity: 1.0, depthWrite: false });
+const bgMesh = new THREE.Mesh(bgGeo, bgMat);
+bgMesh.position.z = -bgDistance;
+bgMesh.renderOrder = -999; 
+camera.add(bgMesh);
+scene.add(camera);
+
+bgMesh.scale.x = innerWidth / innerHeight;
+forestMesh.scale.x = innerWidth / innerHeight;
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);composer.setSize(innerWidth,innerHeight);
+  bgMesh.scale.x = innerWidth / innerHeight;
+  forestMesh.scale.x = innerWidth / innerHeight;
+});
 
 const basePatronusMat = new THREE.MeshBasicMaterial({
   color: 0x9fd4ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
@@ -170,24 +202,37 @@ for(let i=0; i<MAX_ACTORS; i++){
   actorsData.push({ inner, actor, flash, floor, mixer: null, yaw: 0, targetX: 0, mat: null, entry: null });
 }
 
-// 閃光演出
 window.triggerScreenFlash = function() {
   const flashEl = document.getElementById('screen-flash');
   flashEl.style.transition = 'none'; 
   flashEl.style.opacity = '1';
-  
   void flashEl.offsetWidth; 
-  // 【変更】フラッシュのフェードアウト時間を 1.5s から 3.0s に延長しました
   flashEl.style.transition = 'opacity 3.0s ease-out'; 
   flashEl.style.opacity = '0';
 };
 
+let dementorState = 'visible'; 
+let dementorTimer = 0;
+let dementorOp = 1.0;
+let playing = false;
+
+window.resurrectDementor = function() {
+  if (playing) return;
+  if (dementorState === 'hidden') {
+    dementorState = 'fadeIn';
+  }
+};
+
 const ease=t=>t<0?0:t>1?1:t*t*(3-2*t);
-let t0=null,playing=false,activeActors = [];
+let t0=null, activeActors = [];
 
 function summon(forcedIndex = null){
   if (video.paused) video.play().catch(()=>{});
   AudioController.init(); AudioController.playLoop('bgm');
+  
+  dementorState = 'delay';
+  dementorTimer = 5.0; // 退散までの時間を5秒に変更
+
   if(playing) return;
   const available = [...loaded.keys()];
   if(available.length === 0) return;
@@ -200,7 +245,6 @@ function summon(forcedIndex = null){
   else { chosenList = available.sort(() => 0.5 - Math.random()).slice(0, count); }
 
   activeActors = [];
-  
   const aspect = innerWidth / innerHeight;
   const maxSpanX = aspect * 1.6; 
   const idealSpanX = 0.8 * (count - 1); 
@@ -234,26 +278,46 @@ function frame(){
   const dt = Math.min((now - lastTime) / 1000, .05);
   lastTime = now; requestAnimationFrame(frame);
   
+  if (dementorState === 'delay') {
+    dementorTimer -= dt;
+    if (dementorTimer <= 0) {
+      // 5秒経過した瞬間に閃光を放ち、ディメンターを即座に消す（フェードアウトなし）
+      window.triggerScreenFlash();
+      dementorState = 'hidden';
+      dementorOp = 0.0;
+    }
+  } else if (dementorState === 'fadeIn') {
+    dementorOp = Math.min(1, dementorOp + dt / 1.5); 
+    if (dementorOp === 1) dementorState = 'visible';
+  }
+  bgMat.opacity = dementorOp;
+
+
   if(playing){
     const t=now/1000-t0;
-    let scl = 1; if(t<T.form) scl=.7+.3*ease(t/T.form);
-    const stayDuration = 8.0, tEnd = T.form + stayDuration, tFade = tEnd + T.fade;
+    const tEnd = T.form + T.stay;
+    const tFade = tEnd + T.fade;
 
+    let scl = 1; if(t<T.form) scl=.7+.3*ease(t/T.form);
+
+    const u_flash = t / T.form;
+    const flashOp = t < T.form ? (u_flash < 0.2 ? u_flash / 0.2 : 1 - (u_flash - 0.2)/0.8) : 0;
     const baseOp = Math.min(1, t/T.form) * (t > tEnd ? Math.max(0, 1 - (t - tEnd)/T.fade) : 1);
-    const u = t / T.form, flashOp = t < T.form ? (u < 0.2 ? u / 0.2 : 1 - (u - 0.2)/0.8) : 0;
 
     activeActors.forEach((act) => {
       let pos = NEAR.clone(); pos.x = act.targetX; 
-      
       let h = Math.atan2(FAR.x - pos.x, FAR.z - pos.z);
       
-      act.actor.position.copy(pos); act.actor.rotation.y = h; act.actor.scale.setScalar(scl);
+      act.actor.position.copy(pos); 
+      act.actor.rotation.y = h; 
+      act.actor.scale.setScalar(scl);
+      
       const glowLevel = act.entry.glowLevel ?? 1.0;
       act.mat.opacity = baseOp * 0.45 * glowLevel;
 
       if(t < T.form) {
         act.flash.position.copy(pos); act.flash.position.y += 0.8; 
-        act.flash.scale.setScalar(4.0 + Math.sin(u * Math.PI) * 2.0); 
+        act.flash.scale.setScalar(4.0 + Math.sin(u_flash * Math.PI) * 2.0); 
         act.flash.material.opacity = flashOp * 1.0; act.flash.visible = true;
       } else { act.flash.visible = false; }
       
@@ -263,7 +327,11 @@ function frame(){
       act.floor.position.set(pos.x, .02, pos.z);
       act.floor.material.opacity = baseOp * .55; act.floor.scale.setScalar(scl);
     });
-    if(t > tFade){ playing = false; activeActors.forEach(act => { act.actor.visible = false; act.floor.material.opacity = 0; }); }
+    
+    if(t > tFade){ 
+      playing = false; 
+      activeActors.forEach(act => { act.actor.visible = false; act.floor.material.opacity = 0; }); 
+    }
   }
   composer.render();
 }
@@ -272,6 +340,7 @@ frame();
 addEventListener('keydown',e=>{
   if(e.code==='Space'){ e.preventDefault(); summon(); }
   else if(e.code==='Enter'){ e.preventDefault(); window.triggerScreenFlash(); }
+  else if(e.key==='d'||e.key==='D'){ e.preventDefault(); window.resurrectDementor(); } 
   else if(/^[1-9]$/.test(e.key)){
     const keyNum = Number(e.key);
     if(keyNum <= catalog.length && loaded.has(keyNum - 1)) summon(keyNum - 1);
