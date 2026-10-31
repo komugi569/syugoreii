@@ -13,23 +13,37 @@ canvas{display:block}
   background:#222; color:#6cf; border:1px solid #6cf; 
   border-radius:3px; padding:2px 8px; font-family:monospace; font-size:14px;
 }
+.btn {
+  background:#6cf; color:#000; border:none; padding:4px 10px; font-weight:bold;
+  border-radius:4px; cursor:pointer; margin-top:5px; width:100%;
+}
+/* 画面全体を覆うフラッシュ用の白幕 */
+#screen-flash {
+  position:fixed; top:0; left:0; width:100vw; height:100vh;
+  background:#ffffff; opacity:0; z-index:9999; pointer-events:none;
+}
 </style>
 <script type="importmap">
 {"imports":{"three":"./three/build/three.module.js","three/addons/":"./three/examples/jsm/"}}
 </script></head><body>
 
 <div id="hint-container">
-<div>Space=人数分ランダム召喚 / 数字キー(1-9)=単体指定
-R=向き90°回転 / H=UI表示切替 / F=全画面</div>
+<div>Space=人数分召喚 / 数字(1-9)=単体指定
+Enter=閃光 / R=向き90°回転 / H=UI切替 / F=全画面</div>
 <div style="margin: 8px 0; border-top: 1px dashed #6cf; padding-top: 8px;">召喚人数: <select id="summon-count">
   <option value="1">1体</option>
   <option value="2">2体</option>
   <option value="3">3体</option>
   <option value="4">4体</option>
   <option value="5">5体</option>
-</select></div>
+</select>
+<button class="btn" onclick="triggerScreenFlash()">閃光を放つ (Enter)</button>
+</div>
 <div id="hint-text">読み込み中...</div>
 </div>
+
+<!-- フラッシュ演出用のレイヤー -->
+<div id="screen-flash"></div>
 
 <video id="bg-video" src="./ディメンター.mp4" autoplay muted playsinline style="display:none;"></video>
 
@@ -43,29 +57,18 @@ import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
 import {PATRONUS_MODELS} from './patronus-config.js';
 
 const AudioController = {
-  sounds: {},
-  files: { bgm: '守護霊召喚.mp3' },
+  sounds: {}, files: { bgm: '守護霊召喚.mp3' },
   init() {
     if (Object.keys(this.sounds).length === 0) {
       for (const [key, path] of Object.entries(this.files)) {
-        this.sounds[key] = new Audio(path);
-        this.sounds[key].load();
+        this.sounds[key] = new Audio(path); this.sounds[key].load();
       }
     }
   },
   playLoop(type) {
     const sound = this.sounds[type];
-    if (!sound) return;
-    if (!sound.paused) return;
-    sound.loop = true;
-    sound.currentTime = 0;
-    sound.play().catch(()=>{});
-  },
-  stop(type) {
-    const sound = this.sounds[type];
-    if (!sound) return;
-    sound.pause();
-    sound.currentTime = 0;
+    if (!sound || !sound.paused) return;
+    sound.loop = true; sound.currentTime = 0; sound.play().catch(()=>{});
   }
 };
 
@@ -93,278 +96,188 @@ addEventListener('resize',()=>{
 const video = document.getElementById('bg-video');
 const TRIM_START = 2.0; 
 video.addEventListener('loadedmetadata', () => { video.currentTime = TRIM_START; });
-video.addEventListener('ended', () => {
-  video.currentTime = TRIM_START;
-  video.play().catch(()=>{});
-});
+video.addEventListener('ended', () => { video.currentTime = TRIM_START; video.play().catch(()=>{}); });
 
 const videoTexture = new THREE.VideoTexture(video);
 videoTexture.colorSpace = THREE.SRGBColorSpace;
 scene.background = videoTexture;
 scene.fog = new THREE.FogExp2(0x000010, 0.035);
+scene.add(new THREE.AmbientLight(0xffffff, 0.02));
 
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.02);
-scene.add(ambientLight);
-
-// ===== ベースとなる質感 =====
 const basePatronusMat = new THREE.MeshBasicMaterial({
-  color: 0x9fd4ff,
-  transparent: true,
-  opacity: 0,
-  blending: THREE.AdditiveBlending, 
-  depthWrite: false,
-  side: THREE.DoubleSide
+  color: 0x9fd4ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
 });
 
 const catalog=PATRONUS_MODELS;
 const loaded=new Map();
-const failed=new Map();
 
 function updateHintUI() {
   let text = "";
   catalog.forEach((entry, i) => {
-    const status = loaded.has(i) ? "✓" : failed.has(i) ? `読み込み失敗: ${failed.get(i)}` : "読み込み中...";
+    const status = loaded.has(i) ? "✓" : "読込中";
     text += `[ ${i + 1} ] : ${entry.name} (${status})\n`;
   });
   hintText.textContent = text;
 }
 
-// 【変更】 モデルごとに専用のマテリアルをコピーして割り当てる
 function prepareModel(gltf, entry){
   const m = gltf.scene;
-  const mat = basePatronusMat.clone(); // 個別のマテリアルを作成
-
+  const mat = basePatronusMat.clone();
   m.traverse(o=>{if(o.isMesh){o.material=mat;o.frustumCulled=false;}});
   
   const b=new THREE.Box3().setFromObject(m),s=b.getSize(new THREE.Vector3());
   m.scale.setScalar(entry.scale/Math.max(s.x,s.y,s.z));
   const b2=new THREE.Box3().setFromObject(m),c=b2.getCenter(new THREE.Vector3());
-  m.position.set(
-    -c.x + (entry.xOffset || 0),
-    -b2.min.y + (entry.yOffset || 0),
-    -c.z + (entry.zOffset || 0)
-  );
-  
-  // マテリアル自体も返すように変更
+  m.position.set(-c.x + (entry.xOffset || 0), -b2.min.y + (entry.yOffset || 0), -c.z + (entry.zOffset || 0));
   return { m, mat };
 }
 
 updateHintUI();
-
 for(const [i,entry] of catalog.entries()){
   if(entry.url) {
     new GLTFLoader().load(entry.url,g=>{
       const prepped = prepareModel(g, entry);
       loaded.set(i,{ model:prepped.m, mat:prepped.mat, animations:g.animations, entry });
       updateHintUI();
-    },undefined,error=>{
-      console.error(`守護霊モデルの読み込みに失敗しました: ${entry.url}`,error);
-      failed.set(i,`${entry.url} / ${error?.message||error?.type||'不明なエラー'}`);
-      updateHintUI();
-    });
+    },undefined,()=>{ updateHintUI(); });
   }
 }
 
-// ===== 複数召喚用のセットアップ =====
 const MAX_ACTORS = 5;
 const actorsData = [];
 
 const fc = document.createElement('canvas'); fc.width = fc.height = 256;
 const fx = fc.getContext('2d');
 const fg = fx.createRadialGradient(128,128,0, 128,128,128);
-fg.addColorStop(0, 'rgba(255,255,255,1)');
-fg.addColorStop(0.1, 'rgba(200,240,255,1)');
-fg.addColorStop(1, 'rgba(0,0,0,0)');
+fg.addColorStop(0, 'rgba(255,255,255,1)'); fg.addColorStop(0.1, 'rgba(200,240,255,1)'); fg.addColorStop(1, 'rgba(0,0,0,0)');
 fx.fillStyle = fg; fx.fillRect(0,0,256,256);
-const baseFlashMat = new THREE.SpriteMaterial({
-  map: new THREE.CanvasTexture(fc), color: 0xffffff, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false
-});
+const baseFlashMat = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(fc), color: 0xffffff, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
 
 const gc=document.createElement('canvas');gc.width=gc.height=128;
 const gx=gc.getContext('2d'),gg=gx.createRadialGradient(64,64,0,64,64,64);
 gg.addColorStop(0,'rgba(140,200,255,.9)');gg.addColorStop(1,'rgba(0,0,0,0)');gx.fillStyle=gg;gx.fillRect(0,0,128,128);
-const baseFloorMat = new THREE.MeshBasicMaterial({
-  map:new THREE.CanvasTexture(gc), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, opacity:0
-});
+const baseFloorMat = new THREE.MeshBasicMaterial({ map:new THREE.CanvasTexture(gc), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, opacity:0 });
 const floorGeo = new THREE.PlaneGeometry(4,4);
 
 for(let i=0; i<MAX_ACTORS; i++){
-  const inner = new THREE.Group();
-  const actor = new THREE.Group();
-  actor.add(inner);
-  scene.add(actor);
-  actor.visible = false;
+  const inner = new THREE.Group(), actor = new THREE.Group();
+  actor.add(inner); scene.add(actor); actor.visible = false;
   
-  const flash = new THREE.Sprite(baseFlashMat.clone());
-  flash.visible = false;
-  scene.add(flash);
-  
+  const flash = new THREE.Sprite(baseFlashMat.clone()); flash.visible = false; scene.add(flash);
   const floor = new THREE.Mesh(floorGeo, baseFloorMat.clone());
-  floor.rotation.x = -Math.PI/2;
-  floor.position.y = 0.02;
-  scene.add(floor);
+  floor.rotation.x = -Math.PI/2; floor.position.y = 0.02; scene.add(floor);
   
-  // 個別マテリアルと設定を記録するプロパティを追加
   actorsData.push({ inner, actor, flash, floor, mixer: null, yaw: 0, targetX: 0, mat: null, entry: null });
 }
 
+// 閃光演出
+window.triggerScreenFlash = function() {
+  const flashEl = document.getElementById('screen-flash');
+  flashEl.style.transition = 'none'; 
+  flashEl.style.opacity = '1';
+  
+  void flashEl.offsetWidth; 
+  // 【変更】フラッシュのフェードアウト時間を 1.5s から 3.0s に延長しました
+  flashEl.style.transition = 'opacity 3.0s ease-out'; 
+  flashEl.style.opacity = '0';
+};
 
 const ease=t=>t<0?0:t>1?1:t*t*(3-2*t);
-const hAway=Math.atan2(FAR.x-NEAR.x,FAR.z-NEAR.z);
-let t0=null,playing=false;
-let activeActors = [];
+let t0=null,playing=false,activeActors = [];
 
 function summon(forcedIndex = null){
-  if (video.paused) { video.play().catch(()=>{}); }
-  AudioController.init();
-  AudioController.playLoop('bgm');
-
+  if (video.paused) video.play().catch(()=>{});
+  AudioController.init(); AudioController.playLoop('bgm');
   if(playing) return;
   const available = [...loaded.keys()];
   if(available.length === 0) return;
 
-  const countSelect = document.getElementById('summon-count');
-  let count = parseInt(countSelect.value, 10);
+  let count = parseInt(document.getElementById('summon-count').value, 10);
   count = Math.min(count, available.length, MAX_ACTORS);
 
   let chosenList = [];
-  if(forcedIndex !== null) {
-    chosenList.push(forcedIndex);
-    count = 1;
-  } else {
-    const shuffled = available.sort(() => 0.5 - Math.random());
-    chosenList = shuffled.slice(0, count);
-  }
+  if(forcedIndex !== null) { chosenList.push(forcedIndex); count = 1; } 
+  else { chosenList = available.sort(() => 0.5 - Math.random()).slice(0, count); }
 
   activeActors = [];
   
-  //// 【変更】 画面の縦横比（アスペクト比）に合わせて最大幅を自動計算し、はみ出しを防ぐ
   const aspect = innerWidth / innerHeight;
-  const maxSpanX = aspect * 1.6; // 画面幅の約85%を最大幅とする
-  const idealSpanX = 0.8 * (count - 1); // 1体あたりの間隔も少し狭める
+  const maxSpanX = aspect * 1.6; 
+  const idealSpanX = 0.8 * (count - 1); 
   const spanX = count === 1 ? 0 : Math.min(idealSpanX, maxSpanX);
   const startX = count === 1 ? 0 : -(spanX / 2);
 
   for(let i=0; i<count; i++) {
-    const data = loaded.get(chosenList[i]);
-    const act = actorsData[i];
-
+    const data = loaded.get(chosenList[i]), act = actorsData[i];
     while(act.inner.children.length) act.inner.remove(act.inner.children[0]);
     act.inner.add(data.model);
 
     act.yaw = (data.entry.yawOffset||0) + Math.PI;
-    act.inner.rotation.set(0, act.yaw, 0);
-    act.inner.position.set(0, 0, 0);
+    act.inner.rotation.set(0, act.yaw, 0); act.inner.position.set(0, 0, 0);
     
-    // アニメーションと個別の設定をセット
-    act.mat = data.mat;
-    act.entry = data.entry;
-    
+    act.mat = data.mat; act.entry = data.entry;
     act.mixer = data.animations.length ? new THREE.AnimationMixer(data.model) : null;
     if(act.mixer) {
-      let targetClip = null;
-      if (data.entry.animName) targetClip = data.animations.find(c => c.name === data.entry.animName);
+      let targetClip = data.entry.animName ? data.animations.find(c => c.name === data.entry.animName) : null;
       if (!targetClip) targetClip = data.animations[Math.min(data.entry.runAnimIndex ?? 0, data.animations.length - 1)];
       if (targetClip) act.mixer.clipAction(targetClip).reset().play();
     }
-
     act.targetX = startX + (count === 1 ? 0 : (spanX / (count - 1)) * i);
-    
-    act.actor.visible = true;
-    activeActors.push(act);
+    act.actor.visible = true; activeActors.push(act);
   }
-
-  playing=true; 
-  t0=performance.now()/1000;
+  playing=true; t0=performance.now()/1000;
 }
 
 let lastTime = performance.now();
 function frame(){
   const now = performance.now();
   const dt = Math.min((now - lastTime) / 1000, .05);
-  lastTime = now;
-  requestAnimationFrame(frame);
+  lastTime = now; requestAnimationFrame(frame);
   
   if(playing){
     const t=now/1000-t0;
-    let h = hAway, scl = 1;
-    if(t<T.form) scl=.7+.3*ease(t/T.form);
-    
-    const stayDuration = 8.0; 
-    const tEnd = T.form + stayDuration;
-    const tFade = tEnd + T.fade;
+    let scl = 1; if(t<T.form) scl=.7+.3*ease(t/T.form);
+    const stayDuration = 8.0, tEnd = T.form + stayDuration, tFade = tEnd + T.fade;
 
-    // 全体の透明度進行
     const baseOp = Math.min(1, t/T.form) * (t > tEnd ? Math.max(0, 1 - (t - tEnd)/T.fade) : 1);
-    
-    const u = t / T.form;
-    const flashOp = t < T.form ? (u < 0.2 ? u / 0.2 : 1 - (u - 0.2)/0.8) : 0;
+    const u = t / T.form, flashOp = t < T.form ? (u < 0.2 ? u / 0.2 : 1 - (u - 0.2)/0.8) : 0;
 
     activeActors.forEach((act) => {
-      let pos = NEAR.clone();
-      pos.x = act.targetX; 
+      let pos = NEAR.clone(); pos.x = act.targetX; 
       
-      act.actor.position.copy(pos);
-      act.actor.rotation.y = h;
-      act.actor.scale.setScalar(scl);
-
-      // 【変更】 モデルごとの発光度合いを反映（設定がなければ 1.0）
+      let h = Math.atan2(FAR.x - pos.x, FAR.z - pos.z);
+      
+      act.actor.position.copy(pos); act.actor.rotation.y = h; act.actor.scale.setScalar(scl);
       const glowLevel = act.entry.glowLevel ?? 1.0;
       act.mat.opacity = baseOp * 0.45 * glowLevel;
 
       if(t < T.form) {
-        act.flash.position.copy(pos);
-        act.flash.position.y += 0.8; 
+        act.flash.position.copy(pos); act.flash.position.y += 0.8; 
         act.flash.scale.setScalar(4.0 + Math.sin(u * Math.PI) * 2.0); 
-        act.flash.material.opacity = flashOp * 1.0; 
-        act.flash.visible = true;
-      } else {
-        act.flash.visible = false;
-      }
+        act.flash.material.opacity = flashOp * 1.0; act.flash.visible = true;
+      } else { act.flash.visible = false; }
       
-      if(act.mixer) {
-        act.mixer.update(dt * 0.2);
-      } else {
-        act.inner.position.y = Math.sin(now / 800) * 0.15; 
-        act.inner.rotation.z = Math.sin(now / 1000) * 0.05; 
-      }
+      if(act.mixer) act.mixer.update(dt * 0.2);
+      else { act.inner.position.y = Math.sin(now / 800) * 0.15; act.inner.rotation.z = Math.sin(now / 1000) * 0.05; }
       
       act.floor.position.set(pos.x, .02, pos.z);
-      act.floor.material.opacity = baseOp * .55;
-      act.floor.scale.setScalar(scl);
+      act.floor.material.opacity = baseOp * .55; act.floor.scale.setScalar(scl);
     });
-    
-    if(t > tFade){ 
-      playing = false; 
-      activeActors.forEach(act => { act.actor.visible = false; act.floor.material.opacity = 0; }); 
-    }
+    if(t > tFade){ playing = false; activeActors.forEach(act => { act.actor.visible = false; act.floor.material.opacity = 0; }); }
   }
-  
   composer.render();
 }
 frame();
 
 addEventListener('keydown',e=>{
-  if(e.code==='Space'){
-    e.preventDefault();
-    summon(); 
-  }
+  if(e.code==='Space'){ e.preventDefault(); summon(); }
+  else if(e.code==='Enter'){ e.preventDefault(); window.triggerScreenFlash(); }
   else if(/^[1-9]$/.test(e.key)){
     const keyNum = Number(e.key);
-    if(keyNum <= catalog.length && loaded.has(keyNum - 1)) {
-      summon(keyNum - 1);
-    }
+    if(keyNum <= catalog.length && loaded.has(keyNum - 1)) summon(keyNum - 1);
   }
-  else if(e.key==='r'||e.key==='R'){
-    activeActors.forEach(act => {
-      act.yaw += Math.PI/2;
-      act.inner.rotation.y = act.yaw;
-    });
-  }
-  else if(e.key==='h'||e.key==='H'){
-    const hc = document.getElementById('hint-container');
-    hc.style.display = hc.style.display==='none' ? 'block' : 'none';
-  }
+  else if(e.key==='r'||e.key==='R'){ activeActors.forEach(act => { act.yaw += Math.PI/2; act.inner.rotation.y = act.yaw; }); }
+  else if(e.key==='h'||e.key==='H'){ const hc = document.getElementById('hint-container'); hc.style.display = hc.style.display==='none' ? 'block' : 'none'; }
   else if(e.key==='f'||e.key==='F') document.documentElement.requestFullscreen?.();
 });
 
