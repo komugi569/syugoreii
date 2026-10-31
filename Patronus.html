@@ -231,7 +231,7 @@ function summon(forcedIndex = null){
   AudioController.init(); AudioController.playLoop('bgm');
   
   dementorState = 'delay';
-  dementorTimer = 5.0; // 退散までの時間を5秒に変更
+  dementorTimer = 3.5; // 退散までの時間を5秒に変更
 
   if(playing) return;
   const available = [...loaded.keys()];
